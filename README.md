@@ -130,7 +130,7 @@ pytest tests/test_engine.py -v
 
 - **Model ceiling**: A 0.5B model lacks reasoning capacity for GSM8K. Use 1.5B+ for meaningful results.
 - **No correctness signal**: Entropy minimization optimizes for confidence, not accuracy. Without a verifier, TTA can become "more confidently wrong."
-- **Speed**: ~3-5x slower than standard inference due to inner loops and frozen forward passes.
+- **Speed**: ~10-30x slower depending on entropy threshold and inner_steps
 
 ## Known Issues
 
