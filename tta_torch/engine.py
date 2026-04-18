@@ -13,8 +13,9 @@ class TTAModel(nn.Module):
         self.model = model
         defaults = {
             "entropy_threshold": 0.5,
-            "learning_rate": 1e-5,
+            "learning_rate": 1e-4,
             "kl_weight": 0.1,
+            "inner_steps": 2,
             "max_new_tokens": 128,
             "grad_clip": 1.0,
             "n_passes": 3,
@@ -44,7 +45,12 @@ class TTAModel(nn.Module):
         lr = self.tta_config["learning_rate"]
         kl_w = self.tta_config.get("kl_weight", 0.1)
         grad_clip = self.tta_config.get("grad_clip", 1.0)
-        opt = torch.optim.SGD(self.model.parameters(), lr=lr)
+        inner_steps = self.tta_config.get("inner_steps", 1)
+        temperature = kwargs.get("temperature", 0.0)
+        
+        trainable = [p for p in self.model.parameters() if p.requires_grad]
+        opt = torch.optim.AdamW(trainable, lr=lr, betas=(0.9, 0.999))
+        
         max_tok = kwargs.get('max_tokens', self.tta_config.get("max_new_tokens", 128))
         ent_thresh = self.tta_config["entropy_threshold"]
         
@@ -62,7 +68,6 @@ class TTAModel(nn.Module):
             
             ent = self._entropy(logits).mean()
             
-            # Track entropy for best-of-n selection
             if hasattr(self, 'current_entropy'):
                 self.current_entropy.append(ent.item())
             
@@ -70,34 +75,32 @@ class TTAModel(nn.Module):
                 if verbose:
                     print(f"  Token {idx}: entropy={ent.item():.4f} > {ent_thresh} -> TTA update")
                 
-                # LEARNING signal: minimize entropy (make model more confident)
-                ent_loss = ent
-                # STABILITY signal: prevent drift from base model
-                kl = F.kl_div(F.log_softmax(f_logits, dim=-1), F.softmax(logits, dim=-1), reduction='batchmean')
-                # Combined: learn but stay anchored
-                total_loss = ent_loss + (kl_w * kl)
-                
-                if total_loss > 0:
-                    opt.zero_grad()
-                    total_loss.backward()
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), grad_clip)
-                    opt.step()
-                    self.stats['updates'] += 1
+                for step_i in range(inner_steps):
+                    ent_loss = self._entropy(logits).mean()
+                    kl = F.kl_div(F.log_softmax(f_logits, dim=-1), F.softmax(logits, dim=-1), reduction='batchmean')
+                    total_loss = ent_loss + (kl_w * kl)
                     
-                    # Re-run forward and log entropy change
-                    out = self.model(current)
-                    new_logits = out.logits[:, -1, :]
-                    new_ent = self._entropy(new_logits).mean()
-                    self.current_entropy[-1] = new_ent.item()
-                    
-                    if verbose:
-                        change = ((ent.item() - new_ent.item()) / ent.item()) * 100
-                        print(f"    -> entropy={new_ent.item():.4f} (change: {change:+.1f}%)")
-                    
-                    # Use the updated logits for sampling
-                    logits = new_logits
+                    if total_loss > 0:
+                        opt.zero_grad()
+                        total_loss.backward()
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), grad_clip)
+                        opt.step()
+                        self.stats['updates'] += 1
+                        
+                        out = self.model(current)
+                        logits = out.logits[:, -1, :]
+                        
+                        if verbose and step_i == inner_steps - 1:
+                            new_ent = self._entropy(logits).mean()
+                            self.current_entropy[-1] = new_ent.item()
+                            change = ((ent.item() - new_ent.item()) / ent.item()) * 100
+                            print(f"    -> entropy={new_ent.item():.4f} (change: {change:+.1f}%)")
             
-            next_tok = torch.argmax(logits, dim=-1).unsqueeze(-1)
+            if temperature > 0:
+                probs = F.softmax(logits / temperature, dim=-1)
+                next_tok = torch.multinomial(probs, 1)
+            else:
+                next_tok = torch.argmax(logits, dim=-1, keepdim=True)
             current = torch.cat([current, next_tok], dim=-1)
             
             eos = getattr(self.model.config, 'eos_token_id', None)

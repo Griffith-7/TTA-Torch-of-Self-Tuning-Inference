@@ -2,7 +2,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
-def load_tta_model(model_id="Qwen/Qwen2.5-0.5B-Instruct", lora_rank=2):
+def load_tta_model(model_id="Qwen/Qwen2.5-0.5B-Instruct", lora_rank=4):
     """
     Loads a model in 4-bit precision with LoRA adapters 
     for Dynamic Test-Time Adaptation (TTA).
@@ -28,7 +28,7 @@ def load_tta_model(model_id="Qwen/Qwen2.5-0.5B-Instruct", lora_rank=2):
     peft_config = LoraConfig(
         r=lora_rank,
         lora_alpha=16,
-        target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
+        target_modules=["q_proj", "v_proj", "k_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
         lora_dropout=0.05,
         bias="none",
         task_type="CAUSAL_LM"

@@ -118,8 +118,9 @@ class TestConfigHandling:
         """Test default config values"""
         tta_model = TTAModel(mock_model)
         assert tta_model.tta_config["entropy_threshold"] == 0.5
-        assert tta_model.tta_config["learning_rate"] == 1e-5
+        assert tta_model.tta_config["learning_rate"] == 1e-4
         assert tta_model.tta_config["kl_weight"] == 0.1
+        assert tta_model.tta_config["inner_steps"] == 2
         assert tta_model.tta_config["max_new_tokens"] == 128
         assert tta_model.tta_config["grad_clip"] == 1.0
     

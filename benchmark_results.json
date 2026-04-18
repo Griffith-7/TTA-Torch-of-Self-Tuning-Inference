@@ -1,0 +1,51 @@
+{
+  "n": 5,
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "baseline_acc": 0.0,
+  "tta_acc": 0.0,
+  "delta_pp": 0.0,
+  "base_time_s": 25.479092836380005,
+  "tta_time_s": 125.86593413352966,
+  "detail": [
+    {
+      "i": 0,
+      "gold": "18",
+      "base": "498.",
+      "base_ok": false,
+      "tta": "2",
+      "tta_ok": false
+    },
+    {
+      "i": 1,
+      "gold": "3",
+      "base": "4.",
+      "base_ok": false,
+      "tta": "2",
+      "tta_ok": false
+    },
+    {
+      "i": 2,
+      "gold": "70000",
+      "base": "30",
+      "base_ok": false,
+      "tta": "130000.",
+      "tta_ok": false
+    },
+    {
+      "i": 3,
+      "gold": "540",
+      "base": "4",
+      "base_ok": false,
+      "tta": "216",
+      "tta_ok": false
+    },
+    {
+      "i": 4,
+      "gold": "20",
+      "base": "40",
+      "base_ok": false,
+      "tta": "3",
+      "tta_ok": false
+    }
+  ]
+}
