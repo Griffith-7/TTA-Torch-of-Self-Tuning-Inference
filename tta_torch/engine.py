@@ -75,6 +75,7 @@ class TTAModel(nn.Module):
                 if verbose:
                     print(f"  Token {idx}: entropy={ent.item():.4f} > {ent_thresh} -> TTA update")
                 
+                ent_before = ent.item()
                 for step_i in range(inner_steps):
                     ent_loss = self._entropy(logits).mean()
                     kl = F.kl_div(F.log_softmax(f_logits, dim=-1), F.softmax(logits, dim=-1), reduction='batchmean')
@@ -90,8 +91,13 @@ class TTAModel(nn.Module):
                         out = self.model(current)
                         logits = out.logits[:, -1, :]
                         
+                        new_ent = self._entropy(logits).mean()
+                        if new_ent.item() < 0.2 or new_ent.item() > ent_before:
+                            if verbose:
+                                print(f"    -> early stop: ent={new_ent.item():.4f}")
+                            break
+                        
                         if verbose and step_i == inner_steps - 1:
-                            new_ent = self._entropy(logits).mean()
                             self.current_entropy[-1] = new_ent.item()
                             change = ((ent.item() - new_ent.item()) / ent.item()) * 100
                             print(f"    -> entropy={new_ent.item():.4f} (change: {change:+.1f}%)")
@@ -137,6 +143,29 @@ class TTAModel(nn.Module):
 
     def generate_adaptive(self, input_ids, **kwargs):
         return self.generate(input_ids, **kwargs)
-
+    
     def generate_best(self, input_ids, **kwargs):
         return self.generate_best_of_n(input_ids, **kwargs)
+    
+    def generate_majority(self, input_ids, tokenizer=None, n_passes=5, temperature=0.7, **kwargs):
+        """Self-consistency: generate N times, majority vote on numeric answer"""
+        import re
+        answers = []
+        for i in range(n_passes):
+            self.reset_weights()
+            out = self.generate(input_ids, temperature=temperature, **kwargs)
+            if tokenizer:
+                text = tokenizer.decode(out[0][input_ids.shape[1]:], skip_special_tokens=True)
+                nums = re.findall(r"-?\d+\.?\d*", text.replace(",", ""))
+                answers.append(nums[-1] if nums else None)
+            self.stats['generations'] += 1
+        
+        if not answers:
+            return out
+        
+        from collections import Counter
+        valid = [a for a in answers if a is not None]
+        if valid:
+            winner = Counter(valid).most_common(1)[0][0]
+            return winner, answers
+        return answers[0], answers

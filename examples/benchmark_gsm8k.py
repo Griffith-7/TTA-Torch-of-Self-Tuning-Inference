@@ -15,7 +15,7 @@ def extract_answer(text):
 def gold(sample):
     return sample["answer"].split("####")[-1].strip().replace(",", "")
 
-def run_bench(model_id="Qwen/Qwen2.5-0.5B-Instruct", n=3, max_new=60):
+def run_bench(model_id="Qwen/Qwen2.5-0.5B-Instruct", n=20, max_new=80):
     try:
         from datasets import load_dataset
     except ImportError:
