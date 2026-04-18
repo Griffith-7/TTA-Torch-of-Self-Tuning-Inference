@@ -32,11 +32,38 @@ class TTAModel(nn.Module):
             for n, p in self.model.named_parameters():
                 if n in self.init_state:
                     p.copy_(self.init_state[n])
+        self._opt = None
         torch.cuda.empty_cache()
+    
+    def _get_optimizer(self):
+        if getattr(self, '_opt', None) is None:
+            trainable = [p for p in self.model.parameters() if p.requires_grad]
+            self._opt = torch.optim.AdamW(trainable, lr=self.tta_config["learning_rate"], betas=(0.9, 0.999))
+        return self._opt
 
     def _entropy(self, logits):
         p = F.softmax(logits, dim=-1)
         return -(p * torch.log(p + 1e-9)).sum(-1)
+    
+    def _repetition_penalty(self, logits, input_ids, penalty=1.2):
+        logits = logits.clone()
+        for tok_id in set(input_ids[0].tolist()):
+            if logits[0, tok_id] > 0:
+                logits[0, tok_id] = logits[0, tok_id] / penalty
+            else:
+                logits[0, tok_id] = logits[0, tok_id] * penalty
+        return logits
+    
+    def _no_repeat_ngram(self, logits, input_ids, n=3):
+        seq = input_ids[0].tolist()
+        if len(seq) < n:
+            return logits
+        for i in range(len(seq) - n):
+            if tuple(seq[i:i+n-1]) == tuple(seq[-(n-1):]):
+                banned = seq[i+n-1]
+                logits[0, banned] = -float('inf')
+                break
+        return logits
 
     @torch.enable_grad()
     def generate(self, input_ids, **kwargs):
@@ -48,8 +75,7 @@ class TTAModel(nn.Module):
         inner_steps = self.tta_config.get("inner_steps", 1)
         temperature = kwargs.get("temperature", 0.0)
         
-        trainable = [p for p in self.model.parameters() if p.requires_grad]
-        opt = torch.optim.AdamW(trainable, lr=lr, betas=(0.9, 0.999))
+        opt = self._get_optimizer()
         
         max_tok = kwargs.get('max_tokens', self.tta_config.get("max_new_tokens", 128))
         ent_thresh = self.tta_config["entropy_threshold"]
@@ -57,14 +83,10 @@ class TTAModel(nn.Module):
         self.current_entropy = []
         verbose = self.tta_config.get("verbose", False)
         
+        f_logits = None
         for idx in range(max_tok):
             out = self.model(current)
             logits = out.logits[:, -1, :]
-            
-            with self.model.disable_adapter():
-                with torch.no_grad():
-                    frozen = self.model(current)
-                    f_logits = frozen.logits[:, -1, :]
             
             ent = self._entropy(logits).mean()
             
@@ -75,11 +97,17 @@ class TTAModel(nn.Module):
                 if verbose:
                     print(f"  Token {idx}: entropy={ent.item():.4f} > {ent_thresh} -> TTA update")
                 
+                if f_logits is None:
+                    with torch.no_grad(), self.model.disable_adapter():
+                        f_out = self.model(current)
+                        f_logits = f_out.logits[:, -1, :]
+                
                 ent_before = ent.item()
                 for step_i in range(inner_steps):
                     ent_loss = self._entropy(logits).mean()
                     kl = F.kl_div(F.log_softmax(f_logits, dim=-1), F.softmax(logits, dim=-1), reduction='batchmean')
-                    total_loss = ent_loss + (kl_w * kl)
+                    ent_loss_val = max(ent_loss.item() - 0.3, 0.0)
+                    total_loss = ent_loss_val + (kl_w * kl)
                     
                     if total_loss > 0:
                         opt.zero_grad()
@@ -101,6 +129,9 @@ class TTAModel(nn.Module):
                             self.current_entropy[-1] = new_ent.item()
                             change = ((ent.item() - new_ent.item()) / ent.item()) * 100
                             print(f"    -> entropy={new_ent.item():.4f} (change: {change:+.1f}%)")
+            
+            logits = self._repetition_penalty(logits, current, penalty=1.2)
+            logits = self._no_repeat_ngram(logits, current, n=3)
             
             if temperature > 0:
                 probs = F.softmax(logits / temperature, dim=-1)
