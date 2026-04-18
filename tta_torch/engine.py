@@ -18,7 +18,6 @@ class TTAModel(nn.Module):
             "max_new_tokens": 128,
             "grad_clip": 1.0,
             "n_passes": 3,
-            "self_correction_rounds": 2,
             "verbose": False,
         }
         if tta_config:
@@ -44,6 +43,7 @@ class TTAModel(nn.Module):
         current = input_ids.clone()
         lr = self.tta_config["learning_rate"]
         kl_w = self.tta_config.get("kl_weight", 0.1)
+        grad_clip = self.tta_config.get("grad_clip", 1.0)
         opt = torch.optim.SGD(self.model.parameters(), lr=lr)
         max_tok = kwargs.get('max_tokens', self.tta_config.get("max_new_tokens", 128))
         ent_thresh = self.tta_config["entropy_threshold"]
@@ -70,11 +70,17 @@ class TTAModel(nn.Module):
                 if verbose:
                     print(f"  Token {idx}: entropy={ent.item():.4f} > {ent_thresh} -> TTA update")
                 
+                # LEARNING signal: minimize entropy (make model more confident)
+                ent_loss = ent
+                # STABILITY signal: prevent drift from base model
                 kl = F.kl_div(F.log_softmax(f_logits, dim=-1), F.softmax(logits, dim=-1), reduction='batchmean')
-                if kl > 0:
+                # Combined: learn but stay anchored
+                total_loss = ent_loss + (kl_w * kl)
+                
+                if total_loss > 0:
                     opt.zero_grad()
-                    kl.backward()
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+                    total_loss.backward()
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), grad_clip)
                     opt.step()
                     self.stats['updates'] += 1
                     
