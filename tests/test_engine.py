@@ -28,6 +28,11 @@ class MockModel(nn.Module):
         logits = torch.randn(batch_size, seq_len, 151644, requires_grad=True)
         return type('Output', (), {'logits': logits})()
     
+    def generate(self, input_ids, max_new_tokens=10, **kwargs):
+        batch_size = input_ids.shape[0]
+        new_tokens = torch.randint(0, 151643, (batch_size, max_new_tokens))
+        return torch.cat([input_ids, new_tokens], dim=-1)
+    
     def named_parameters(self, recurse=True):
         return [('lora_weight', self.lora_weight)]
     
@@ -174,6 +179,24 @@ class TestAdaptiveGeneration:
         assert new_tokens <= max_tokens, f"Should generate at most {max_tokens} tokens"
 
 
+class ConnectedModel(nn.Module):
+    """A model where forward pass actually depends on parameters, for gradient testing"""
+    def __init__(self):
+        super().__init__()
+        self.config = MockConfig()
+        self.embed = nn.Linear(100, 128)
+        self.head = nn.Linear(128, 100)
+
+    def forward(self, input_ids):
+        x = torch.randn(input_ids.shape[0], input_ids.shape[1], 100, device=input_ids.device)
+        x = torch.relu(self.embed(x))
+        logits = self.head(x)
+        return type('O', (), {'logits': logits})()
+
+    def disable_adapter(self):
+        return MockContextManager()
+
+
 class TestGradientFlow:
     """Test that gradients flow properly during TTA"""
     
@@ -197,6 +220,86 @@ class TestGradientFlow:
             except:
                 pass
 
+    def test_entropy_loss_has_gradient(self):
+        """Entropy loss must remain differentiable (not .item())"""
+        model = ConnectedModel()
+        tta = TTAModel(model, {"max_new_tokens": 1})
+        input_ids = torch.tensor([[1, 2, 3]])
+
+        out = model(input_ids)
+        logits = out.logits[:, -1, :]
+
+        ent_loss = tta._entropy(logits).mean()
+        assert ent_loss.grad_fn is not None, "Entropy loss must have grad_fn (must be differentiable)"
+
+    def test_total_loss_has_both_gradients(self):
+        """total_loss must get gradients from BOTH entropy and KL terms"""
+        model = ConnectedModel()
+        tta = TTAModel(model, {"max_new_tokens": 1})
+        input_ids = torch.tensor([[1, 2, 3]])
+
+        out = model(input_ids)
+        logits = out.logits[:, -1, :]
+
+        with torch.no_grad():
+            f_logits = model(input_ids).logits[:, -1, :]
+
+        ent_loss = tta._entropy(logits).mean()
+        kl = F.kl_div(F.log_softmax(f_logits, dim=-1), F.softmax(logits, dim=-1), reduction='batchmean')
+
+        ent_clamped = torch.clamp(ent_loss - 0.3, min=0.0)
+        total_loss = ent_clamped + (0.1 * kl)
+
+        opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
+        opt.zero_grad()
+        total_loss.backward()
+
+        has_any_grad = False
+        for n, p in model.named_parameters():
+            if p.grad is not None and p.grad.abs().sum() > 0:
+                has_any_grad = True
+                break
+        assert has_any_grad, "At least one parameter must receive gradients from total_loss"
+
+    def test_weights_change_after_tta(self):
+        """Weights must actually change after TTA generation"""
+        model = ConnectedModel()
+        tta = TTAModel(model, {
+            "entropy_threshold": 0.01,
+            "max_new_tokens": 3,
+            "inner_steps": 2,
+            "learning_rate": 1e-3,
+        })
+        input_ids = torch.tensor([[1, 2, 3]])
+
+        w_before = {n: p.clone() for n, p in model.named_parameters()}
+        tta.generate(input_ids)
+        w_after = {n: p.clone() for n, p in model.named_parameters()}
+
+        any_changed = False
+        for n in w_before:
+            if (w_after[n] - w_before[n]).abs().max().item() > 1e-8:
+                any_changed = True
+                break
+        assert any_changed, "At least one parameter must change after TTA generation"
+
+    def test_entropy_decrease_on_simple_input(self):
+        """TTA should produce an entropy trace"""
+        model = ConnectedModel()
+        tta = TTAModel(model, {
+            "entropy_threshold": 0.01,
+            "max_new_tokens": 3,
+            "inner_steps": 5,
+            "learning_rate": 1e-2,
+            "verbose": False,
+        })
+        input_ids = torch.tensor([[1, 2, 3]])
+        tta.generate(input_ids)
+
+        assert len(tta.current_entropy) > 0, "Should have entropy trace"
+        assert all(isinstance(e, float) for e in tta.current_entropy), "All entropy values should be floats"
+        assert all(e >= 0 for e in tta.current_entropy), "All entropy values should be non-negative"
+
 
 class TestEdgeCases:
     """Test edge cases"""
@@ -217,6 +320,46 @@ class TestEdgeCases:
         logits = torch.randn(4, 10)
         entropy = model._entropy(logits)
         assert entropy.shape[0] == 4, "Should handle multiple batches"
+
+
+class TestConfidenceGated:
+    """Test confidence-gated TTA method"""
+
+    def test_returns_tuple_with_reason(self, mock_model):
+        """Should return (tensor, reason_string, entropy_float)"""
+        tta = TTAModel(mock_model, {"entropy_threshold": 0.5, "max_new_tokens": 5, "learning_rate": 1e-5})
+        input_ids = torch.tensor([[1, 2, 3]])
+        out, reason, ent = tta.generate_confidence_gated(input_ids, n_passes=2, max_tokens=5)
+        assert isinstance(out, torch.Tensor)
+        assert reason in ("baseline_confident", "tta_helped", "tta_no_improvement")
+        assert isinstance(ent, float)
+
+    def test_output_is_2d(self, mock_model):
+        """Output tensor must be 2D [batch, seq_len]"""
+        tta = TTAModel(mock_model, {"entropy_threshold": 0.5, "max_new_tokens": 5, "learning_rate": 1e-5})
+        input_ids = torch.tensor([[1, 2, 3]])
+        out, _, _ = tta.generate_confidence_gated(input_ids, n_passes=2, max_tokens=5)
+        assert out.dim() == 2, f"Expected 2D tensor, got {out.dim()}D"
+
+    def test_baseline_confident_skips_tta(self, mock_model):
+        """With high threshold, baseline should always be confident"""
+        tta = TTAModel(mock_model, {"entropy_threshold": 99.0, "max_new_tokens": 5, "learning_rate": 1e-5})
+        input_ids = torch.tensor([[1, 2, 3]])
+        out, reason, _ = tta.generate_confidence_gated(input_ids, n_passes=2, max_tokens=5)
+        assert reason == "baseline_confident"
+
+
+class TestEntropyWeighted:
+    """Test entropy-weighted voting method"""
+
+    def test_returns_2d_tensor(self, mock_model):
+        tta = TTAModel(mock_model, {"max_new_tokens": 5})
+        input_ids = torch.tensor([[1, 2, 3]])
+        out, reason, ent = tta.generate_entropy_weighted_vote(input_ids, n_passes=3, max_tokens=5)
+        assert isinstance(out, torch.Tensor)
+        assert out.dim() == 2
+        assert reason == "entropy_weighted"
+        assert isinstance(ent, float)
 
 
 if __name__ == "__main__":

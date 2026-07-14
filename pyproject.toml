@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=64.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tta-torch"
+version = "0.3.0"
+description = "Dynamic Test-Time Adaptation for LLMs — real-time weight updates during inference for improved accuracy"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+keywords = ["llm", "test-time-adaptation", "tta", "inference", "pytorch", "transformers", "self-tuning", "peft", "lora"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+urls = {Homepage = "https://github.com/Griffith-7/TTA-Torch-of-Self-Tuning-Inference", Source = "https://github.com/Griffith-7/TTA-Torch-of-Self-Tuning-Inference"}
+dependencies = [
+    "torch>=2.0.0",
+    "transformers>=4.35.0",
+    "peft>=0.7.0",
+    "bitsandbytes>=0.41.0",
+    "accelerate>=0.25.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0.0", "pytest-timeout>=2.0.0"]
+dev-all = ["pytest>=7.0.0", "pytest-timeout>=2.0.0", "ruff>=0.1.0"]
+docs = ["sphinx>=7.0", "furo>=2024.0", "sphinx-autodoc-typehints>=2.0"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["tta_torch"]
+
+[project.scripts]
+tta-torch = "tta_torch.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow (GPU heavy, skip with -m 'not slow')",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+exclude = ["benchmarks", "examples"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N"]
+ignore = ["E501", "N803", "N806", "N812", "W293"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["N", "I", "E402", "F541", "E701", "E702"]
