@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
-from transformers import PreTrainedModel
 import torch.nn.functional as F
+from transformers import PreTrainedModel
+
 
 class TTAModel(nn.Module):
     """
@@ -215,7 +216,6 @@ class TTAModel(nn.Module):
         3. If baseline is uncertain (high entropy) -> run TTA + majority voting
         4. Only keep TTA if it actually reduces entropy
         """
-        from collections import Counter
 
         max_tok = kwargs.get('max_tokens', self.tta_config.get("max_new_tokens", 128))
         ent_thresh = self.tta_config["entropy_threshold"]

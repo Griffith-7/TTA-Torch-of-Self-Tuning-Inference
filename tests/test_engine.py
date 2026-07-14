@@ -2,7 +2,7 @@ import pytest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import patch
 import sys
 import os
 
@@ -206,7 +206,6 @@ class TestGradientFlow:
         tta_model = TTAModel(mock_model, tta_config)
         input_ids = torch.tensor([[1, 2, 3]])
         
-        has_grad = False
         original_backward = torch.Tensor.backward
         
         def track_backward(*args, **kwargs):
@@ -217,7 +216,7 @@ class TestGradientFlow:
         with patch.object(torch.Tensor, 'backward', track_backward):
             try:
                 tta_model.generate_adaptive(input_ids)
-            except:
+            except Exception:
                 pass
 
     def test_entropy_loss_has_gradient(self):

@@ -139,7 +139,7 @@ def cmd_generate(args: argparse.Namespace) -> None:
 
     print("\n--- Generated Output ---")
     print(result)
-    print(f"\n--- Stats ---")
+    print("\n--- Stats ---")
     print(f"Method:        {args.method}")
     print(f"Wall time:     {elapsed:.3f}s")
 
@@ -201,7 +201,7 @@ def cmd_benchmark(args: argparse.Namespace) -> None:
     accuracy = correct / total if total > 0 else 0.0
     avg_time = total_time / total if total > 0 else 0.0
 
-    print(f"\n--- Benchmark Results ---")
+    print("\n--- Benchmark Results ---")
     print(f"Method:        {args.method}")
     print(f"Answered:      {correct}/{total}")
     print(f"Accuracy:      {accuracy:.1%}")

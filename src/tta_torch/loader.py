@@ -1,10 +1,11 @@
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
 
 def load_tta_model(model_id="Qwen/Qwen2.5-0.5B-Instruct", lora_rank=4):
     """
-    Loads a model in 4-bit precision with LoRA adapters 
+    Loads a model in 4-bit precision with LoRA adapters
     for Dynamic Test-Time Adaptation (TTA).
     """
     print(f"Loading {model_id}...")
