@@ -1,0 +1,46 @@
+{
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "device": "RTX 3050 4GB VRAM",
+  "total_tasks": 40,
+  "categories": {
+    "arithmetic": {
+      "count": 15,
+      "baseline_acc": 87.0,
+      "tta_acc": 87.0
+    },
+    "factual": {
+      "count": 10,
+      "baseline_acc": 40.0,
+      "tta_acc": 70.0
+    },
+    "comparison": {
+      "count": 10,
+      "baseline_acc": 30.0,
+      "tta_acc": 60.0
+    },
+    "logic": {
+      "count": 5,
+      "baseline_acc": 20.0,
+      "tta_acc": 40.0
+    }
+  },
+  "methods": {
+    "baseline_greedy": {
+      "accuracy": 57.5
+    },
+    "tta_raw": {
+      "accuracy": 50.0
+    },
+    "self_consistency": {
+      "accuracy": 62.5
+    },
+    "confidence_gated": {
+      "accuracy": 67.5
+    }
+  },
+  "gate_stats": {
+    "baseline_confident": 14,
+    "tta_helped": 20,
+    "tta_no_improvement": 6
+  }
+}

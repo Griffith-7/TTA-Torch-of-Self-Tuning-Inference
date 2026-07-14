@@ -86,6 +86,8 @@ measurably more accurate outputs on small models running on consumer hardware.
 
 ## Memory / VRAM Scaling
 
+![Memory Usage](benchmarks/memory_usage.png)
+
 | Model Size | Quantization | LoRA Rank | Min VRAM | Total VRAM (Generation) |
 |---|---|---|---|---|
 | 0.5B | 4-bit NF4 | 4 | ~1.5 GB | ~2.0 GB |
@@ -112,10 +114,21 @@ Tested on arithmetic, factual QA, comparison, and logic tasks (Qwen2.5-0.5B, 40 
 | **Confidence-Gated TTA** | **67.5%** | **+10.0pp** | **~3-5x** |
 | Entropy-Weighted Vote | 63.0% | +5.5pp | ~3x |
 
+![Accuracy Comparison](benchmarks/accuracy_comparison.png)
+
 > **Key finding:** Raw TTA minimizes entropy, not correctness. Confidence-Gated TTA fixes
 > this by running the baseline first and only applying TTA when the model is uncertain.
 
+### Entropy Reduction During TTA
+
+![Entropy Trace](benchmarks/entropy_trace.png)
+
+Confidence-Gated TTA skips adaptation when the baseline is already confident (first 3 steps),
+then rapidly reduces entropy once TTA activates.
+
 ### Confidence Gate Breakdown
+
+![Gate Breakdown](benchmarks/gate_breakdown.png)
 
 | Task Category | Baseline Confident | TTA Applied | Accuracy |
 |---|---|---|---|
